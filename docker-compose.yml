@@ -13,7 +13,7 @@ services:
       PYTHONPATH: /app
     depends_on: [db]
     ports: ["8000:8000"]
-    # command можно оставить или убрать — compose переопределит CMD из Dockerfile:
+    # command can be left or removed - compose will override CMD from Dockerfile:
     # command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 volumes:

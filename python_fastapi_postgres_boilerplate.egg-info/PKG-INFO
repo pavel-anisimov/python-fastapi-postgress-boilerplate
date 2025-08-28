@@ -1,0 +1,16 @@
+Metadata-Version: 2.4
+Name: python-fastapi-postgres-boilerplate
+Version: 0.1.0
+Requires-Python: >=3.11
+Requires-Dist: fastapi>=0.116
+Requires-Dist: uvicorn[standard]<0.36.0,>=0.35.0
+Requires-Dist: pydantic[email]<3.0.0,>=2.11.7
+Requires-Dist: SQLAlchemy>=2.0
+Requires-Dist: asyncpg>=0.30
+Requires-Dist: alembic>=1.16
+Requires-Dist: passlib[bcrypt]<2.0.0,>=1.7.4
+Requires-Dist: PyJWT>=2.10
+Requires-Dist: python-dotenv>=1.1
+Requires-Dist: psycopg-binary<4.0.0,>=3.2.9
+Requires-Dist: email-validator<3.0.0,>=2.3.0
+Requires-Dist: python-jose[cryptography]<4.0.0,>=3.5.0

@@ -1,5 +1,8 @@
-from pydantic import BaseModel
 import os
+from pydantic import BaseModel
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class Settings(BaseModel):
     database_url: str = os.getenv("DATABASE_URL", "postgresql+asyncpg://app:app@localhost:5432/app")

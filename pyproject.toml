@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "python-fastapi-postgres-boilerplate"
 version = "0.1.0"
@@ -17,3 +21,6 @@ dependencies = [
   "python-jose[cryptography] (>=3.5.0,<4.0.0)"
 ]
 
+[tool.setuptools]
+# We say explicitly: search for packages only in app*, excluding alembic and others
+packages = { find = { include = ["app*"], exclude = ["alembic*", "tests*", "scripts*"] } }
