@@ -12,10 +12,20 @@ services:
     environment:
       PYTHONPATH: /app
       DATABASE_URL: postgresql+asyncpg://app:app@db:5432/app  # only for containers
+      SMTP_HOST: mailpit          # override .env for container
+      SMTP_PORT: 1025
+      SMTP_TLS: "false"
     depends_on: [db]
     ports: ["${API_PORT}:8000"]
     # command can be left or removed - compose will override CMD from Dockerfile:
     # command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8025:8025"     # Web UI (locally open http://localhost:8025)
+      - "127.0.0.1:1025:1025"     # SMTP порт для тестов с хоста
 
 volumes:
   pgdata17:
