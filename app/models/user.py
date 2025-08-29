@@ -1,25 +1,26 @@
-from sqlalchemy import String, Boolean, ForeignKey
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
+from sqlalchemy import String, Integer, Boolean, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from ..db import Base
+from .base import Base
+
+if TYPE_CHECKING:
+    from .role import UserRole
+    from .item import Item
 
 class User(Base):
     __tablename__ = "users"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
-    hashed_password: Mapped[str] = mapped_column(String(255))
-    is_active: Mapped[bool] = mapped_column(default=True)
-    roles: Mapped[list["UserRole"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
 
-class Role(Base):
-    __tablename__ = "roles"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(50), unique=True, index=True)
-    users: Mapped[list["UserRole"]] = relationship(back_populates="role", cascade="all, delete-orphan")
-
-class UserRole(Base):
-    __tablename__ = "user_roles"
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
-    role_id: Mapped[int] = mapped_column(ForeignKey("roles.id"), primary_key=True)
-    user: Mapped["User"] = relationship(back_populates="roles")
-    role: Mapped["Role"] = relationship(back_populates="users")
-
+    roles: Mapped[list[UserRole]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan"
+    )
+    items: Mapped[list[Item]] = relationship(
+        back_populates="owner",
+        cascade="all, delete-orphan"
+    )
