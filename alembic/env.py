@@ -12,7 +12,7 @@ from alembic import context
 import os
 import sys
 
-# Добавляем корень проекта в sys.path, чтобы импортировать app/*
+# Add the project root to sys.path to import app/*
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 from app.db import Base, engine  # Base и engine из твоего кода

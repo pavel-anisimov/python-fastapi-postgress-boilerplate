@@ -11,8 +11,9 @@ services:
     env_file: [.env]
     environment:
       PYTHONPATH: /app
+      DATABASE_URL: postgresql+asyncpg://app:app@db:5432/app  # only for containers
     depends_on: [db]
-    ports: ["8000:8000"]
+    ports: ["${API_PORT}:8000"]
     # command can be left or removed - compose will override CMD from Dockerfile:
     # command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
