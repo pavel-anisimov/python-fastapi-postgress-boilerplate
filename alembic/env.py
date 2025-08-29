@@ -11,7 +11,7 @@ target_metadata = Base.metadata
 
 def _db_url():
     url = os.getenv("DATABASE_URL") or "postgresql+psycopg://app:app@localhost:5433/app"
-    # если приложение даёт async URL, сдвигаем его на sync v3 для Alembic
+    # if the application gives an async URL, we shift it to sync v3 for Alembic
     return url.replace("+asyncpg", "+psycopg")
 
 def run_migrations_offline():

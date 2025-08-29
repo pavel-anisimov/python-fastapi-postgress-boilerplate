@@ -75,7 +75,7 @@ async def verify_email(token: str, session: AsyncSession = Depends(get_session))
 
     user.is_verified = True
     # optional: dbt.used_at = datetime.now(timezone.utc)
-    await session.delete(dbt)  # или помечайте used_at
+    await session.delete(dbt)  # or mark used_at
     await session.commit()
     return {"status": "verified"}
 
