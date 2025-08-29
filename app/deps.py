@@ -36,3 +36,10 @@ def require_roles(*names: str):
         return user
     return dep
 
+# so that old imports like "from app.deps import get_session" work
+get_session = get_db
+
+async def get_current_user_verified(user: User = Depends(get_current_user)) -> User:
+    if not getattr(user, "is_verified", False):
+        raise HTTPException(status_code=403, detail="Email is not verified")
+    return user

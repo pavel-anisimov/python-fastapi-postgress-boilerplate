@@ -1,22 +1,38 @@
 services:
   db:
     image: postgres:17
+    restart: unless-stopped
     env_file: [.env]
     ports: ["${POSTGRES_PORT:-5432}:5432"]
     volumes: [pgdata17:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-app} -h localhost"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   api:
     build: .
-    working_dir: /
+    working_dir: /app
+    restart: unless-stopped
     env_file: [.env]
     environment:
       PYTHONPATH: /app
-      DATABASE_URL: postgresql+asyncpg://app:app@db:5432/app  # only for containers
-      SMTP_HOST: mailpit          # override .env for container
-      SMTP_PORT: 1025
+      # DSN для контейнеров (хост = db)
+      DATABASE_URL: postgresql+asyncpg://app:app@db:5432/app
+      # SMTP внутри docker-сети — по имени сервиса
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
       SMTP_TLS: "false"
-    depends_on: [db]
-    ports: ["${API_PORT}:8000"]
+      SMTP_USER: ""
+      SMTP_PASS: ""
+      SMTP_FROM: "no-reply@example.local"
+    depends_on:
+      db:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+    ports: ["${API_PORT:-8000}:8000"]
     # command can be left or removed - compose will override CMD from Dockerfile:
     # command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
@@ -25,7 +41,8 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:8025:8025"     # Web UI (locally open http://localhost:8025)
-      - "127.0.0.1:1025:1025"     # SMTP порт для тестов с хоста
+      - "127.0.0.1:1025:1025"     # SMTP port for tests from host
+
 
 volumes:
   pgdata17:
