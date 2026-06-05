@@ -184,9 +184,10 @@ async def test_post_auth_login_success_contract(api_state) -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert set(payload) == {"access_token", "token_type"}
+    assert set(payload) == {"access_token", "refresh_token", "token_type"}
     assert payload["token_type"] == "bearer"
     assert payload["access_token"]
+    assert payload["refresh_token"]
 
 
 @pytest.mark.asyncio
@@ -280,6 +281,69 @@ async def test_get_users_me_contract_with_bearer_token(api_state) -> None:
     assert "email_verified_at" in payload
     assert "roles" in payload
     assert_no_sensitive_fields(payload)
+
+
+@pytest.mark.asyncio
+async def test_post_auth_refresh_with_valid_refresh_token_contract(api_state) -> None:
+    _session, sent_emails = api_state
+    await asgi_request("POST", "/auth/register", json_body={"email": "user@example.com", "password": "secret"})
+    await asgi_request("GET", f"/auth/verify?token={sent_emails[0].token}")
+    login = await asgi_request("POST", "/auth/login", json_body={"email": "user@example.com", "password": "secret"})
+
+    response = await asgi_request(
+        "POST",
+        "/auth/refresh",
+        json_body={"refresh_token": login.json()["refresh_token"]},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert set(payload) == {"access_token", "token_type"}
+    assert payload["token_type"] == "bearer"
+    assert payload["access_token"]
+
+
+@pytest.mark.asyncio
+async def test_post_auth_refresh_validation_error_shape(api_state) -> None:
+    response = await asgi_request("POST", "/auth/refresh", json_body={})
+
+    assert response.status_code == 422
+    payload = response.json()
+    assert isinstance(payload["detail"], list)
+    assert any(error["loc"][-1] == "refresh_token" for error in payload["detail"])
+
+
+@pytest.mark.asyncio
+async def test_post_auth_refresh_rejects_invalid_token_contract(api_state) -> None:
+    response = await asgi_request("POST", "/auth/refresh", json_body={"refresh_token": "not-a-jwt"})
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Invalid refresh token"}
+
+
+@pytest.mark.asyncio
+async def test_post_auth_logout_with_valid_bearer_access_token_contract(api_state) -> None:
+    _session, sent_emails = api_state
+    await asgi_request("POST", "/auth/register", json_body={"email": "user@example.com", "password": "secret"})
+    await asgi_request("GET", f"/auth/verify?token={sent_emails[0].token}")
+    login = await asgi_request("POST", "/auth/login", json_body={"email": "user@example.com", "password": "secret"})
+
+    response = await asgi_request(
+        "POST",
+        "/auth/logout",
+        headers={"authorization": f"Bearer {login.json()['access_token']}"},
+    )
+
+    assert response.status_code == 204
+    assert response.body == b""
+
+
+@pytest.mark.asyncio
+async def test_post_auth_logout_without_bearer_token_contract(api_state) -> None:
+    response = await asgi_request("POST", "/auth/logout")
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Not authenticated"}
 
 
 @pytest.mark.asyncio

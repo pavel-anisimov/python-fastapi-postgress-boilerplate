@@ -26,6 +26,7 @@ class Settings(BaseModel):
     jwt_secret: str = _require_jwt_secret()
     jwt_alg: str = os.getenv("JWT_ALG", "HS256")
     access_token_expire_minutes: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+    refresh_token_expire_days: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
 
     # CORS / Frontend
     cors_origins: str = os.getenv("CORS_ORIGINS", "http://localhost:5173")

@@ -12,8 +12,8 @@ from app.models.role import Role, UserRole
 from app.models.token import EmailToken
 from app.models.user import User
 from app.routers import auth
-from app.schemas.auth import EmailIn, RegisterIn, ResetPasswordIn
-from app.security import verify_password
+from app.schemas.auth import EmailIn, RefreshIn, RegisterIn, ResetPasswordIn
+from app.security import create_access_token, create_refresh_token, verify_password
 
 
 class FakeResult:
@@ -207,6 +207,7 @@ async def test_login_after_verification_returns_access_token(sent_emails: list[S
 
     assert response.token_type == "bearer"
     assert response.access_token
+    assert response.refresh_token
 
 
 @pytest.mark.asyncio
@@ -397,9 +398,10 @@ async def test_login_response_contains_only_bearer_token_fields(sent_emails: lis
     response = await auth.login(RegisterIn(email="USER@example.com", password="secret"), session)
     payload = response.model_dump()
 
-    assert set(payload) == {"access_token", "token_type"}
+    assert set(payload) == {"access_token", "refresh_token", "token_type"}
     assert payload["token_type"] == "bearer"
     assert payload["access_token"]
+    assert payload["refresh_token"]
     assert "hashed_password" not in payload
 
 
@@ -711,3 +713,98 @@ async def test_current_user_unverified_behavior_is_explicitly_rejected(sent_emai
 
     assert exc.value.status_code == 403
     assert exc.value.detail == "Email is not verified"
+
+
+@pytest.mark.asyncio
+async def test_refresh_with_valid_refresh_token_returns_new_access_token(sent_emails: list[SentEmail]) -> None:
+    session = FakeSession()
+    await register_user(session, sent_emails, password="secret")
+    await verify_user(session, sent_emails[0].token)
+    login = await auth.login(RegisterIn(email="user@example.com", password="secret"), session)
+
+    response = await auth.refresh(RefreshIn(refresh_token=login.refresh_token), session)
+
+    assert response.token_type == "bearer"
+    assert response.access_token
+    assert not hasattr(response, "refresh_token")
+
+
+@pytest.mark.asyncio
+async def test_refresh_rejects_access_token_used_as_refresh_token(sent_emails: list[SentEmail]) -> None:
+    session = FakeSession()
+    await register_user(session, sent_emails)
+    await verify_user(session, sent_emails[0].token)
+    access_token = create_access_token("user@example.com")
+
+    with pytest.raises(HTTPException) as exc:
+        await auth.refresh(RefreshIn(refresh_token=access_token), session)
+
+    assert exc.value.status_code == 401
+    assert exc.value.detail == "Invalid refresh token"
+
+
+@pytest.mark.asyncio
+async def test_refresh_rejects_random_invalid_token(sent_emails: list[SentEmail]) -> None:
+    session = FakeSession()
+
+    with pytest.raises(HTTPException) as exc:
+        await auth.refresh(RefreshIn(refresh_token="not-a-jwt"), session)
+
+    assert exc.value.status_code == 401
+    assert exc.value.detail == "Invalid refresh token"
+
+
+@pytest.mark.asyncio
+async def test_refresh_rejects_missing_user(sent_emails: list[SentEmail]) -> None:
+    session = FakeSession()
+    refresh_token = create_refresh_token("missing@example.com")
+
+    with pytest.raises(HTTPException) as exc:
+        await auth.refresh(RefreshIn(refresh_token=refresh_token), session)
+
+    assert exc.value.status_code == 401
+    assert exc.value.detail == "Invalid refresh token"
+
+
+@pytest.mark.asyncio
+async def test_refresh_rejects_inactive_user(sent_emails: list[SentEmail]) -> None:
+    session = FakeSession()
+    user = await register_user(session, sent_emails)
+    await verify_user(session, sent_emails[0].token)
+    user.is_active = False
+    refresh_token = create_refresh_token(user.email)
+
+    with pytest.raises(HTTPException) as exc:
+        await auth.refresh(RefreshIn(refresh_token=refresh_token), session)
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "User is inactive"
+
+
+@pytest.mark.asyncio
+async def test_refresh_rejects_unverified_user(sent_emails: list[SentEmail]) -> None:
+    session = FakeSession()
+    user = await register_user(session, sent_emails)
+    refresh_token = create_refresh_token(user.email)
+
+    with pytest.raises(HTTPException) as exc:
+        await auth.refresh(RefreshIn(refresh_token=refresh_token), session)
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "Email is not verified"
+
+
+@pytest.mark.asyncio
+async def test_current_user_rejects_refresh_token_used_as_bearer_access_token(sent_emails: list[SentEmail]) -> None:
+    from app.deps import get_current_user
+
+    session = FakeSession()
+    user = await register_user(session, sent_emails)
+    await verify_user(session, sent_emails[0].token)
+    bearer = type("Bearer", (), {"credentials": create_refresh_token(user.email)})()
+
+    with pytest.raises(HTTPException) as exc:
+        await get_current_user(bearer, session)
+
+    assert exc.value.status_code == 401
+    assert exc.value.detail == "Invalid token"

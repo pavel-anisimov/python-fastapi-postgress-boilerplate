@@ -1,16 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 import secrets, hashlib
 from datetime import datetime, timedelta, timezone
 
-from app.deps import get_session
-from app.schemas.auth import EmailIn, MessageOut, RegisterIn, ResetPasswordIn, TokenOut
+from app.deps import get_current_user, get_session
+from app.schemas.auth import EmailIn, MessageOut, RefreshIn, RefreshOut, RegisterIn, ResetPasswordIn, TokenOut
 from app.models.user import User
 from app.models.token import EmailToken
 from app.models.role import Role, UserRole
 from app.services.mailer import send_reset_password_email, send_verify_email
-from app.security import hash_password, verify_password, create_access_token
+from app.security import decode_token, hash_password, verify_password, create_access_token, create_refresh_token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -146,7 +146,39 @@ async def login(payload: RegisterIn, session: AsyncSession = Depends(get_session
         raise HTTPException(status_code=403, detail="Email is not verified")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="User is inactive")
-    return TokenOut(access_token=create_access_token(user.email))
+    return TokenOut(
+        access_token=create_access_token(user.email),
+        refresh_token=create_refresh_token(user.email),
+    )
+
+
+@router.post("/refresh", response_model=RefreshOut)
+async def refresh(payload: RefreshIn, session: AsyncSession = Depends(get_session)):
+    try:
+        token_payload = decode_token(payload.refresh_token, expected_type="refresh")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+    email = token_payload.get("sub")
+    if not email:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+    user = (
+        await session.execute(select(User).where(User.email == _normalize_email(email)))
+    ).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+    if not user.is_verified:
+        raise HTTPException(status_code=403, detail="Email is not verified")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="User is inactive")
+
+    return RefreshOut(access_token=create_access_token(user.email))
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(user: User = Depends(get_current_user)):
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/resend-verification", response_model=MessageOut)

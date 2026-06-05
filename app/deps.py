@@ -16,7 +16,7 @@ async def get_db() -> AsyncSession:
 
 async def get_current_user(token=Depends(bearer), db: AsyncSession = Depends(get_db)) -> User:
     try:
-        payload = decode_token(token.credentials)
+        payload = decode_token(token.credentials, expected_type="access")
     except Exception:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
     email = payload.get("sub")

@@ -18,15 +18,29 @@ def verify_password(password: str, hashed_password: str) -> bool:
     return bcrypt.checkpw(password_bytes, hashed_bytes)
 
 
-def create_access_token(sub: str, minutes: int | None = None) -> str:
+def _create_token(sub: str, token_type: str, expires_delta: timedelta) -> str:
     now = datetime.now(timezone.utc)
-    expires_in = minutes if minutes is not None else settings.access_token_expire_minutes
     payload = {
         "sub": sub,
+        "type": token_type,
         "iat": now,
-        "exp": now + timedelta(minutes=expires_in),
+        "exp": now + expires_delta,
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_alg)
 
-def decode_token(token: str) -> dict:
-    return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_alg])
+
+def create_access_token(sub: str, minutes: int | None = None) -> str:
+    expires_in = minutes if minutes is not None else settings.access_token_expire_minutes
+    return _create_token(sub, "access", timedelta(minutes=expires_in))
+
+
+def create_refresh_token(sub: str, days: int | None = None) -> str:
+    expires_in = days if days is not None else settings.refresh_token_expire_days
+    return _create_token(sub, "refresh", timedelta(days=expires_in))
+
+
+def decode_token(token: str, expected_type: str | None = None) -> dict:
+    payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_alg])
+    if expected_type is not None and payload.get("type") != expected_type:
+        raise jwt.InvalidTokenError("Invalid token type")
+    return payload
