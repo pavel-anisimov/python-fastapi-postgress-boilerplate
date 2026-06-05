@@ -10,5 +10,7 @@ async def me(db: AsyncSession = Depends(get_db), user=Depends(get_current_user))
         "id": user.id,
         "email": user.email,
         "is_active": user.is_active,
+        "is_verified": user.is_verified,
+        "email_verified_at": user.email_verified_at,
         "roles": [ur.role.name for ur in user.roles],
     }

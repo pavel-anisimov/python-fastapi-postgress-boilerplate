@@ -5,87 +5,170 @@ import secrets, hashlib
 from datetime import datetime, timedelta, timezone
 
 from app.deps import get_session
-from app.schemas.auth import RegisterIn, TokenOut
+from app.schemas.auth import EmailIn, MessageOut, RegisterIn, ResetPasswordIn, TokenOut
 from app.models.user import User
 from app.models.token import EmailToken
-from app.services.mailer import send_verify_email
+from app.models.role import Role, UserRole
+from app.services.mailer import send_reset_password_email, send_verify_email
 from app.security import hash_password, verify_password, create_access_token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-@router.post("/register", response_model=TokenOut)
+VERIFY_TOKEN_TTL_HOURS = 24
+RESET_TOKEN_TTL_HOURS = 1
+
+
+def _normalize_email(email: str) -> str:
+    return email.strip().lower()
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _token_hash(raw_token: str) -> str:
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+
+def _is_expired(expires_at: datetime) -> bool:
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return expires_at <= _now()
+
+
+async def _create_email_token(
+    session: AsyncSession,
+    user_id: int,
+    purpose: str,
+    ttl_hours: int,
+) -> str:
+    raw_token = secrets.token_urlsafe(32)
+    session.add(
+        EmailToken(
+            user_id=user_id,
+            purpose=purpose,
+            token_hash=_token_hash(raw_token),
+            expires_at=_now() + timedelta(hours=ttl_hours),
+        )
+    )
+    return raw_token
+
+
+async def _get_valid_email_token(
+    session: AsyncSession,
+    raw_token: str,
+    purpose: str,
+) -> EmailToken:
+    db_token = await session.scalar(
+        select(EmailToken).where(
+            and_(
+                EmailToken.token_hash == _token_hash(raw_token),
+                EmailToken.purpose == purpose,
+            )
+        )
+    )
+    if not db_token or db_token.used_at or _is_expired(db_token.expires_at):
+        raise HTTPException(status_code=400, detail="Invalid or expired token")
+    return db_token
+
+
+@router.post("/register", response_model=MessageOut)
 async def register(data: RegisterIn, session: AsyncSession = Depends(get_session)):
-    exists = await session.scalar(select(User).where(User.email == data.email))
+    email = _normalize_email(data.email)
+    exists = await session.scalar(select(User).where(User.email == email))
     if exists:
         raise HTTPException(status_code=400, detail="Email already registered")
 
     user = User(
-        email=data.email,
+        email=email,
         hashed_password=hash_password(data.password),
         is_verified=False,
         is_active=True,
+        email_verified_at=None,
     )
     session.add(user)
     await session.flush()
 
-    # 1) generate a raw token and calculate the hash
-    raw_token = secrets.token_urlsafe(32)  # this will go into the link
-    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=24)  # TTL optional
+    default_role = await session.scalar(select(Role).where(Role.name == "user"))
+    if default_role:
+        session.add(UserRole(user_id=user.id, role_id=default_role.id))
 
-    # 2) save ONLY the hash (and TTL, if any)
-    token = EmailToken(
-        user_id=user.id,
-        purpose="verify",
-        token_hash=token_hash,
-        expires_at=expires_at,  # if the model has this field
-    )
-    session.add(token)
+    raw_token = await _create_email_token(session, user.id, "verify", VERIFY_TOKEN_TTL_HOURS)
     await session.commit()
-    await session.refresh(token)
 
-    # 3) send a letter with a "raw" token
     send_verify_email(user.email, raw_token)
 
-    # 4) you can return JWT as it was (access to protected handles will still be cut off by get_current_user_verified)
-    return TokenOut(access_token=create_access_token(user.email))
+    return MessageOut(ok=True, message="registration accepted; verification email sent")
 
 
 
-@router.get("/verify", response_model=dict)
+@router.get("/verify", response_model=MessageOut)
 async def verify_email(token: str, session: AsyncSession = Depends(get_session)):
-    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
-
-    dbt = await session.scalar(
-        select(EmailToken).where(
-            and_(
-                EmailToken.token_hash == token_hash,
-                EmailToken.purpose == "verify",
-                # # if expires_at exists:
-                # EmailToken.expires_at > datetime.now(timezone.utc),
-            )
-        )
-    )
-    if not dbt or (hasattr(dbt, "is_expired") and dbt.is_expired()):
-        raise HTTPException(status_code=400, detail="Invalid or expired token")
+    dbt = await _get_valid_email_token(session, token, "verify")
 
     user = await session.get(User, dbt.user_id)
     if not user:
         raise HTTPException(status_code=400, detail="User not found")
 
     user.is_verified = True
-    # optional: dbt.used_at = datetime.now(timezone.utc)
-    await session.delete(dbt)  # or mark used_at
+    user.email_verified_at = _now()
+    dbt.used_at = _now()
+    await session.delete(dbt)
     await session.commit()
-    return {"status": "verified"}
+    return MessageOut(ok=True, message="email verified")
 
 
 @router.post("/login", response_model=TokenOut)
 async def login(payload: RegisterIn, session: AsyncSession = Depends(get_session)):
+    email = _normalize_email(payload.email)
     user = (
-        await session.execute(select(User).where(User.email == payload.email))
+        await session.execute(select(User).where(User.email == email))
     ).scalar_one_or_none()
     if not user or not verify_password(payload.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    if not user.is_verified:
+        raise HTTPException(status_code=403, detail="Email is not verified")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="User is inactive")
     return TokenOut(access_token=create_access_token(user.email))
 
+
+@router.post("/resend-verification", response_model=MessageOut)
+async def resend_verification(data: EmailIn, session: AsyncSession = Depends(get_session)):
+    email = _normalize_email(data.email)
+    user = await session.scalar(select(User).where(User.email == email))
+    if user and not user.is_verified:
+        raw_token = await _create_email_token(session, user.id, "verify", VERIFY_TOKEN_TTL_HOURS)
+        await session.commit()
+        send_verify_email(user.email, raw_token)
+
+    return MessageOut(
+        ok=True,
+        message="if an account exists and is not verified, a verification email has been sent",
+    )
+
+
+@router.post("/forgot-password", response_model=MessageOut)
+async def forgot_password(data: EmailIn, session: AsyncSession = Depends(get_session)):
+    email = _normalize_email(data.email)
+    user = await session.scalar(select(User).where(User.email == email))
+    if user:
+        raw_token = await _create_email_token(session, user.id, "reset", RESET_TOKEN_TTL_HOURS)
+        await session.commit()
+        send_reset_password_email(user.email, raw_token)
+
+    return MessageOut(ok=True, message="if an account exists, a reset email has been sent")
+
+
+@router.post("/reset-password", response_model=MessageOut)
+async def reset_password(data: ResetPasswordIn, session: AsyncSession = Depends(get_session)):
+    dbt = await _get_valid_email_token(session, data.token, "reset")
+    user = await session.get(User, dbt.user_id)
+    if not user:
+        raise HTTPException(status_code=400, detail="User not found")
+
+    user.hashed_password = hash_password(data.password)
+    dbt.used_at = _now()
+    await session.delete(dbt)
+    await session.commit()
+    return MessageOut(ok=True, message="password has been reset")

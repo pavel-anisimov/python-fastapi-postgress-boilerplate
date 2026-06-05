@@ -36,3 +36,11 @@ def send_verify_email(email: str, token: str):
     text = f"Hello!\nConfirm your email: {link}"
     html = f"""<p>Hello!</p><p>Confirm your email: <a href="{link}">{link}</a></p>"""
     send_email(subject, text, [email], body_html=html)
+
+
+def send_reset_password_email(email: str, token: str):
+    link = f"{settings.frontend_origin}/auth/reset-password?token={token}"
+    subject = "Reset your password"
+    text = f"Hello!\nReset your password: {link}"
+    html = f"""<p>Hello!</p><p>Reset your password: <a href="{link}">{link}</a></p>"""
+    send_email(subject, text, [email], body_html=html)
