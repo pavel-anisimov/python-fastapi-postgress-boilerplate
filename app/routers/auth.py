@@ -54,6 +54,22 @@ async def _create_email_token(
     return raw_token
 
 
+async def _delete_email_tokens(
+    session: AsyncSession,
+    user_id: int,
+    purpose: str,
+) -> None:
+    while db_token := await session.scalar(
+        select(EmailToken).where(
+            and_(
+                EmailToken.user_id == user_id,
+                EmailToken.purpose == purpose,
+            )
+        )
+    ):
+        await session.delete(db_token)
+
+
 async def _get_valid_email_token(
     session: AsyncSession,
     raw_token: str,
@@ -138,6 +154,8 @@ async def resend_verification(data: EmailIn, session: AsyncSession = Depends(get
     email = _normalize_email(data.email)
     user = await session.scalar(select(User).where(User.email == email))
     if user and not user.is_verified:
+        # invalidate previously issued verify tokens so only the latest one works
+        await _delete_email_tokens(session, user.id, "verify")
         raw_token = await _create_email_token(session, user.id, "verify", VERIFY_TOKEN_TTL_HOURS)
         await session.commit()
         send_verify_email(user.email, raw_token)

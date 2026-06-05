@@ -1,9 +1,11 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from .db import SessionLocal
 from .security import decode_token
 from .models.user import User
+from .models.role import UserRole
 from sqlalchemy import select
 
 bearer = HTTPBearer()
@@ -20,9 +22,20 @@ async def get_current_user(token=Depends(bearer), db: AsyncSession = Depends(get
     email = payload.get("sub")
     if not email:
         raise HTTPException(status_code=401, detail="Invalid token")
-    user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
+    # eager-load roles: lazy loading would raise MissingGreenlet in async sessions
+    user = (
+        await db.execute(
+            select(User)
+            .options(selectinload(User.roles).selectinload(UserRole.role))
+            .where(User.email == email)
+        )
+    ).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    if not user.is_verified:
+        raise HTTPException(status_code=403, detail="Email is not verified")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="User is inactive")
     return user
 
 def require_roles(*names: str):

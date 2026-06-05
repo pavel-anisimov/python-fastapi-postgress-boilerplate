@@ -4,12 +4,26 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# HS256 needs a key of at least 32 bytes (RFC 7518 section 3.2)
+MIN_JWT_SECRET_LENGTH = 32
+
+
+def _require_jwt_secret() -> str:
+    secret = os.getenv("JWT_SECRET", "")
+    if len(secret) < MIN_JWT_SECRET_LENGTH:
+        raise RuntimeError(
+            f"JWT_SECRET must be set and at least {MIN_JWT_SECRET_LENGTH} characters long. "
+            "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+        )
+    return secret
+
+
 class Settings(BaseModel):
     # Database
     database_url: str = os.getenv("DATABASE_URL", "postgresql+asyncpg://app:app@localhost:5432/app")
 
     # JWT
-    jwt_secret: str = os.getenv("JWT_SECRET", "dev")
+    jwt_secret: str = _require_jwt_secret()
     jwt_alg: str = os.getenv("JWT_ALG", "HS256")
     access_token_expire_minutes: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
