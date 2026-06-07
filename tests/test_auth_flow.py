@@ -8,6 +8,7 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy.sql.elements import BinaryExpression, BooleanClauseList
 
+from app.models.profile import UserProfile
 from app.models.role import Role, UserRole
 from app.models.token import EmailToken
 from app.models.user import User
@@ -37,8 +38,10 @@ class FakeSession:
         self.roles: list[Role] = [Role(id=1, name="user")]
         self.user_roles: list[UserRole] = []
         self.tokens: list[EmailToken] = []
+        self.profiles: list[UserProfile] = []
         self._next_user_id = 1
         self._next_token_id = 1
+        self._next_profile_id = 1
         self.commits = 0
 
     def add(self, obj: Any) -> None:
@@ -56,6 +59,12 @@ class FakeSession:
             return
         if isinstance(obj, UserRole):
             self.user_roles.append(obj)
+            return
+        if isinstance(obj, UserProfile):
+            if obj.id is None:
+                obj.id = self._next_profile_id
+                self._next_profile_id += 1
+            self.profiles.append(obj)
             return
         raise AssertionError(f"unexpected add: {obj!r}")
 
@@ -93,6 +102,8 @@ class FakeSession:
             rows = self.roles
         elif entity is EmailToken:
             rows = self.tokens
+        elif entity is UserProfile:
+            rows = self.profiles
         else:
             raise AssertionError(f"unexpected select entity: {entity!r}")
 

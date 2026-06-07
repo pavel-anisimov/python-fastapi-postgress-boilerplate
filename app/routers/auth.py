@@ -9,6 +9,7 @@ from app.schemas.auth import EmailIn, MessageOut, RefreshIn, RefreshOut, Registe
 from app.models.user import User
 from app.models.token import EmailToken
 from app.models.role import Role, UserRole
+from app.models.profile import UserProfile
 from app.services.mailer import send_reset_password_email, send_verify_email
 from app.security import decode_token, hash_password, verify_password, create_access_token, create_refresh_token
 
@@ -108,6 +109,9 @@ async def register(data: RegisterIn, session: AsyncSession = Depends(get_session
     default_role = await session.scalar(select(Role).where(Role.name == "user"))
     if default_role:
         session.add(UserRole(user_id=user.id, role_id=default_role.id))
+
+    # every user gets an empty editable profile from the start
+    session.add(UserProfile(user_id=user.id, language="en", profile_completed=False))
 
     raw_token = await _create_email_token(session, user.id, "verify", VERIFY_TOKEN_TTL_HOURS)
     await session.commit()
